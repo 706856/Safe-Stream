@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SafeStream - Fair Use Verifier</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f8fafc; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        .drag-active {
+            border-color: #f59e0b;
+            background-color: #fffbeb;
+        }
+
+        .scan-line {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background-color: #f59e0b;
+            box-shadow: 0 0 10px #f59e0b, 0 0 20px #f59e0b;
+            opacity: 0.8;
+            animation: scan 2s linear infinite;
+            display: none;
+            z-index: 20;
+        }
+
+        @keyframes scan {
+            0% { top: 0%; }
+            50% { top: 100%; }
+            100% { top: 0%; }
+        }
+
+        .scanning .scan-line {
+            display: block;
+        }
+    </style>
+</head>
+<body class="bg-slate-900 min-h-screen font-sans text-slate-200 flex flex-col">
+
+    <!-- Top Navigation & API Key Configuration -->
+    <nav class="bg-slate-950 shadow-md border-b border-slate-800 px-6 py-4 flex flex-col sm:flex-row justify-between items-center gap-4 shrink-0">
+        <div class="flex items-center space-x-3 text-white">
+            <i class="fa-solid fa-shield-halved text-amber-500 text-2xl"></i>
+            <h1 class="text-2xl font-bold tracking-tight">Safe<span class="text-amber-500 font-light">Stream</span></h1>
+        </div>
+        
+        <div class="flex items-center bg-slate-900 p-2 rounded-lg border border-slate-700 w-full sm:w-auto">
+            <i class="fa-solid fa-key text-slate-500 ml-2 mr-3"></i>
+            <input 
+                type="password" 
+                id="apiKeyInput" 
+                placeholder="Paste Gemini API Key here..." 
+                class="bg-transparent border-none focus:outline-none text-sm w-64 text-slate-200 placeholder-slate-500"
+            >
+            <button id="saveKeyBtn" class="ml-2 bg-amber-500 hover:bg-amber-400 text-slate-900 text-xs px-4 py-1.5 rounded transition-colors font-bold">
+                Save
+            </button>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="max-w-5xl mx-auto w-full p-4 md:p-8 flex-1 flex flex-col h-full">
+        
+        <div class="text-center mb-8 mt-4">
+            <h2 class="text-3xl font-extrabold text-white mb-2">Copyright Risk Assessor</h2>
+            <p class="text-slate-400">Upload a sports screenshot. AI will scan for official broadcast logos and assess your risk of a copyright strike.</p>
+        </div>
+
+        <div class="bg-slate-800 rounded-2xl shadow-xl border border-slate-700 flex flex-col md:flex-row overflow-hidden flex-1 min-h-[500px]">
+            
+            <!-- LEFT PANEL: Image Upload -->
+            <section class="w-full md:w-1/2 p-6 border-b md:border-b-0 md:border-r border-slate-700 bg-slate-800 flex flex-col relative">
+                
+                <h3 class="text-lg font-bold text-slate-200 mb-4 flex items-center">
+                    <i class="fa-solid fa-image mr-2 text-amber-500"></i> Media Input
+                </h3>
+
+                <!-- Upload Area -->
+                <div id="dropZone" class="flex-1 border-2 border-dashed border-slate-600 rounded-xl bg-slate-900 flex flex-col items-center justify-center p-6 text-center cursor-pointer hover:bg-slate-800 transition-colors relative group overflow-hidden">
+                    
+                    <input type="file" id="fileInput" accept="image/*" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10">
+                    
+                    <!-- Scan line effect -->
+                    <div class="scan-line"></div>
+
+                    <!-- Default Upload State -->
+                    <div id="uploadPrompt" class="flex flex-col items-center pointer-events-none">
+                        <div class="w-16 h-16 bg-slate-800 text-amber-500 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                            <i class="fa-solid fa-cloud-arrow-up text-2xl"></i>
+                        </div>
+                        <p class="font-bold text-slate-300">Click to upload or drag image</p>
+                        <p class="text-xs text-slate-500 mt-2">Supports JPG, PNG</p>
+                    </div>
+
+                    <!-- Image Preview State -->
+                    <img id="imagePreview" class="absolute inset-0 w-full h-full object-contain p-2 hidden pointer-events-none rounded-xl" src="" alt="Preview">
+                    
+                    <!-- Overlay for scanning state -->
+                    <div id="scanningOverlay" class="absolute inset-0 bg-slate-900 bg-opacity-60 hidden items-center justify-center pointer-events-none z-10">
+                        <span class="text-amber-500 font-mono font-bold tracking-widest uppercase">Analyzing Pixels...</span>
+                    </div>
+                </div>
+
+                <!-- Re-upload button -->
+                <button id="clearImgBtn" class="mt-4 text-sm text-slate-400 font-medium hover:text-white hidden">
+                    <i class="fa-solid fa-xmark mr-1"></i> Clear Selection
+                </button>
+
+                <div id="statusMessage" class="hidden mt-4 p-3 rounded-lg flex items-center space-x-3 text-sm font-medium"></div>
+
+                <button 
+                    id="scanBtn" 
+                    disabled
+                    class="mt-6 w-full bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold py-4 rounded-xl flex items-center justify-center space-x-2 transition-all text-lg shadow-md disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed shrink-0"
+                >
+                    <i id="btnIcon" class="fa-solid fa-radar"></i>
+                    <span id="btnText">Run Copyright Scan</span>
+                </button>
+            </section>
+
+            <!-- RIGHT PANEL: AI Assessment -->
+            <section class="w-full md:w-1/2 bg-slate-900 flex flex-col relative overflow-hidden">
+                <div class="p-4 border-b border-slate-800 bg-slate-950 flex justify-between items-center z-10 shadow-sm">
+                    <h3 class="text-lg font-bold text-slate-200 flex items-center">
+                        <i class="fa-solid fa-file-contract mr-2 text-amber-500"></i> Risk Assessment
+                    </h3>
+                </div>
+
+                <div id="resultContainer" class="flex-1 p-6 overflow-y-auto custom-scrollbar">
+                    
+                    <!-- Empty State -->
+                    <div id="emptyResultState" class="h-full flex flex-col items-center justify-center text-slate-600 opacity-80">
+                        <i class="fa-solid fa-shield-virus text-6xl mb-4 text-slate-700"></i>
+                        <p class="text-sm text-center px-4 font-medium">Upload media and run the scan to get your copyright risk report.</p>
+                    </div>
+
+                    <!-- Actual Result Content (Injected by JS) -->
+                    <div id="decodedContent" class="hidden space-y-6">
+                        <!-- Content goes here -->
+                    </div>
+
+                </div>
+            </section>
+
+        </div>
+    </main>
+
+    <!-- JavaScript Logic -->
+    <script>
+        // DOM Elements
+        const apiKeyInput = document.getElementById('apiKeyInput');
+        const saveKeyBtn = document.getElementById('saveKeyBtn');
+        
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const uploadPrompt = document.getElementById('uploadPrompt');
+        const imagePreview = document.getElementById('imagePreview');
+        const clearImgBtn = document.getElementById('clearImgBtn');
+        const scanningOverlay = document.getElementById('scanningOverlay');
+        
+        const scanBtn = document.getElementById('scanBtn');
+        const btnText = document.getElementById('btnText');
+        const btnIcon = document.getElementById('btnIcon');
+        const statusMessage = document.getElementById('statusMessage');
+        
+        const emptyResultState = document.getElementById('emptyResultState');
+        const decodedContent = document.getElementById('decodedContent');
+
+        // State Variables
+        let apiKey = localStorage.getItem('gemini_api_key') || '';
+        let base64Image = null;
+        let imageMimeType = null;
+
+        // Initialize API Key
+        if (apiKey) apiKeyInput.value = apiKey;
+
+        saveKeyBtn.addEventListener('click', () => {
+            const key = apiKeyInput.value.trim();
+            if (key) {
+                apiKey = key;
+                localStorage.setItem('gemini_api_key', key);
+                saveKeyBtn.textContent = "Saved";
+                saveKeyBtn.classList.replace('bg-amber-500', 'bg-emerald-500');
+                setTimeout(() => { 
+                    saveKeyBtn.textContent = "Save";
+                    saveKeyBtn.classList.replace('bg-emerald-500', 'bg-amber-500');
+                }, 2000);
+            }
+        });
+
+        // --- Drag and Drop Logic ---
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.add('drag-active'), false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.remove('drag-active'), false);
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            handleFiles(files);
+        });
+
+        fileInput.addEventListener('change', function() {
+            handleFiles(this.files);
+        });
+
+        // --- File Handling & Base64 Conversion ---
+        function handleFiles(files) {
+            if (files.length === 0) return;
+            const file = files[0];
+            
+            if (!file.type.startsWith('image/')) {
+                showStatus('error', 'Please upload a valid image file (JPG, PNG).');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const base64DataUrl = e.target.result;
+                
+                imagePreview.src = base64DataUrl;
+                imagePreview.classList.remove('hidden');
+                uploadPrompt.classList.add('hidden');
+                clearImgBtn.classList.remove('hidden');
+                scanBtn.disabled = false;
+                
+                base64Image = base64DataUrl.split(',')[1];
+                imageMimeType = file.type;
+                
+                resetResultArea();
+            };
+            reader.readAsDataURL(file);
+        }
+
+        clearImgBtn.addEventListener('click', () => {
+            fileInput.value = '';
+            base64Image = null;
+            imageMimeType = null;
+            imagePreview.src = '';
+            imagePreview.classList.add('hidden');
+            uploadPrompt.classList.remove('hidden');
+            clearImgBtn.classList.add('hidden');
+            scanBtn.disabled = true;
+            resetResultArea();
+        });
+
+        // --- API Submission ---
+        scanBtn.addEventListener('click', async () => {
+            if (!base64Image) return;
+            
+            if (!apiKey) {
+                showStatus('error', 'Please save your Gemini API Key at the top first.');
+                return;
+            }
+
+            setLoading(true);
+            showStatus('hidden', '');
+
+            try {
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+                
+                const prompt = `
+                You are an expert copyright and intellectual property assessment AI for sports media. 
+                Examine this image carefully.
+
+                Your task: Look for official broadcast logos, watermarks, score bugs (the graphics showing the score), channel icons (like ESPN, Sky Sports, Star Sports, etc.), or specific proprietary camera angles that indicate this is ripped from an official television broadcast.
+
+                Respond strictly in JSON format with the following keys:
+                - "riskLevel": Strictly "High", "Medium", or "Low". (High means obvious broadcast logos/scorebugs are present).
+                - "detectedElements": An array of strings describing what you found (e.g., ["Star Sports Logo Top Right", "Official Premier League Score Bug", "No obvious watermarks"]).
+                - "assessment": A 2-3 sentence explanation of why you gave it this risk level.
+                - "recommendation": A short advice on what the creator should do before posting (e.g., "Crop the top right corner", "Safe to post").
+                `;
+
+                const payload = {
+                    contents: [{
+                        parts: [
+                            { text: prompt },
+                            { 
+                                inlineData: { 
+                                    mimeType: imageMimeType, 
+                                    data: base64Image 
+                                } 
+                            }
+                        ]
+                    }],
+                    generationConfig: {
+                        responseMimeType: "application/json"
+                    }
+                };
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) throw new Error('API Error: Check if your API key is valid.');
+
+                const data = await response.json();
+                
+                if (!data.candidates || !data.candidates[0].content) {
+                    throw new Error('No valid response received from AI.');
+                }
+
+                const aiResponseText = data.candidates[0].content.parts[0].text;
+                const aiData = JSON.parse(aiResponseText);
+
+                renderResult(aiData);
+
+            } catch (error) {
+                console.error(error);
+                showStatus('error', error.message || 'Failed to scan the image.');
+                resetResultArea();
+            } finally {
+                setLoading(false);
+            }
+        });
+
+        // --- UI Rendering ---
+        function renderResult(data) {
+            emptyResultState.classList.add('hidden');
+            decodedContent.classList.remove('hidden');
+
+            let riskColor = '';
+            let riskIcon = '';
+            
+            if (data.riskLevel === 'High') {
+                riskColor = 'text-red-500 border-red-500 bg-red-500 bg-opacity-10';
+                riskIcon = 'fa-triangle-exclamation';
+            } else if (data.riskLevel === 'Medium') {
+                riskColor = 'text-amber-500 border-amber-500 bg-amber-500 bg-opacity-10';
+                riskIcon = 'fa-circle-exclamation';
+            } else {
+                riskColor = 'text-emerald-500 border-emerald-500 bg-emerald-500 bg-opacity-10';
+                riskIcon = 'fa-shield-check';
+            }
+
+            let elementsHtml = '';
+            if (data.detectedElements && Array.isArray(data.detectedElements)) {
+                elementsHtml = data.detectedElements.map(item => `
+                    <li class="flex items-start mb-2 text-slate-300">
+                        <i class="fa-solid fa-crosshairs text-slate-500 mt-1 mr-2 text-xs"></i>
+                        <span>${item}</span>
+                    </li>
+                `).join('');
+            }
+
+            decodedContent.innerHTML = `
+                <div class="flex items-center justify-between border border-slate-700 p-4 rounded-xl bg-slate-800 mb-6">
+                    <div>
+                        <h4 class="text-sm font-bold uppercase tracking-widest text-slate-400 mb-1">Strike Risk</h4>
+                        <div class="text-2xl font-black ${riskColor.split(' ')[0]} flex items-center">
+                            <i class="fa-solid ${riskIcon} mr-2"></i> ${data.riskLevel}
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <span class="inline-block px-3 py-1 rounded border font-mono text-xs font-bold ${riskColor}">
+                            SCAN COMPLETE
+                        </span>
+                    </div>
+                </div>
+
+                <div class="mb-6">
+                    <h4 class="text-sm font-bold uppercase tracking-wider text-amber-500 mb-3 border-b border-slate-700 pb-2">
+                        Detected Intellectual Property
+                    </h4>
+                    <ul class="text-sm font-medium bg-slate-800 p-4 rounded-xl border border-slate-700">
+                        ${elementsHtml || '<li class="text-slate-500 italic">No specific elements detected.</li>'}
+                    </ul>
+                </div>
+
+                <div class="mb-6">
+                    <h4 class="text-sm font-bold uppercase tracking-wider text-amber-500 mb-2">AI Assessment</h4>
+                    <p class="text-slate-300 leading-relaxed text-sm bg-slate-800 p-4 rounded-xl border border-slate-700">
+                        ${data.assessment}
+                    </p>
+                </div>
+
+                <div class="mt-8 pt-4 border-t border-slate-800">
+                    <h4 class="text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">Recommendation</h4>
+                    <p class="text-sm text-slate-200 font-bold flex items-start">
+                        <i class="fa-solid fa-lightbulb mt-0.5 mr-2 text-amber-500"></i>
+                        <span>${data.recommendation}</span>
+                    </p>
+                </div>
+            `;
+        }
+
+        function resetResultArea() {
+            emptyResultState.classList.remove('hidden');
+            decodedContent.classList.add('hidden');
+            decodedContent.innerHTML = '';
+        }
+
+        function setLoading(isLoading) {
+            fileInput.disabled = isLoading;
+            clearImgBtn.disabled = isLoading;
+            
+            if (isLoading) {
+                dropZone.classList.add('scanning');
+                scanningOverlay.classList.remove('hidden');
+                scanningOverlay.classList.add('flex');
+                
+                scanBtn.disabled = true;
+                btnText.textContent = 'Scanning Pixels...';
+                btnIcon.className = 'fa-solid fa-spinner fa-spin';
+                
+                emptyResultState.classList.add('hidden');
+                decodedContent.classList.add('hidden');
+            } else {
+                dropZone.classList.remove('scanning');
+                scanningOverlay.classList.add('hidden');
+                scanningOverlay.classList.remove('flex');
+                
+                scanBtn.disabled = false;
+                btnText.textContent = 'Run Copyright Scan';
+                btnIcon.className = 'fa-solid fa-radar';
+            }
+        }
+
+        function showStatus(type, text) {
+            if (type === 'hidden') {
+                statusMessage.classList.add('hidden');
+                return;
+            }
+
+            statusMessage.classList.remove('hidden', 'bg-red-500', 'text-white', 'bg-amber-500', 'text-slate-900');
+            
+            let icon = '';
+            if (type === 'error') {
+                statusMessage.classList.add('bg-red-500', 'bg-opacity-20', 'text-red-400', 'border', 'border-red-500');
+                icon = '<i class="fa-solid fa-circle-exclamation text-lg"></i>';
+            } else if (type === 'info') {
+                statusMessage.classList.add('bg-amber-500', 'bg-opacity-20', 'text-amber-400', 'border', 'border-amber-500');
+                icon = '<i class="fa-solid fa-spinner fa-spin text-lg"></i>';
+            }
+
+            statusMessage.innerHTML = `${icon}<span>${text}</span>`;
+        }
+    </script>
+</body>
+</html>
